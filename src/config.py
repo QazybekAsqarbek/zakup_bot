@@ -5,13 +5,14 @@ load_dotenv()
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
-# Anthropic (для фото)
+# AI settings
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-ANTHROPIC_MODEL = "claude-haiku-4-5"
+ANTHROPIC_MODEL = "claude-3-5-sonnet-20241022"
 
-# DeepSeek (для текста)
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
-DEEPSEEK_MODEL = "deepseek-chat"  # V3 (лучше подходит для JSON, чем Reasoner/R1)
+DEEPSEEK_MODEL = "deepseek-chat"
 
-DB_PATH = "sqlite:///data/procure.db"
+# Database settings
+MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
+DB_NAME = "smartprocure"
