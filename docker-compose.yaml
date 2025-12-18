@@ -1,0 +1,11 @@
+services:
+  bot:
+    build: .
+    container_name: smart_procure_bot
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data  # Чтобы база данных сохранялась при перезапуске
+    environment:
+      - PYTHONUNBUFFERED=1
