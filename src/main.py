@@ -6,6 +6,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Cal
 from src.config import TELEGRAM_TOKEN
 from src.database import SessionLocal, Project, Quote, QuoteItem
 from src.ai_engine import process_content_with_ai
+from src.file_reader import extract_text_from_file
 
 # --- НАСТРОЙКА ЛОГИРОВАНИЯ ---
 logging.basicConfig(
@@ -106,15 +107,18 @@ async def handle_incoming_message(update: Update, context: ContextTypes.DEFAULT_
     file_id = None
     text_content = None
     mime_type = None
+    filename = "message.txt"
 
     if update.message.text:
         is_text = True
         text_content = update.message.text
     elif update.message.photo:
+        filename = "photo.jpg"
         is_image = True
         file_id = update.message.photo[-1].file_id
         mime_type = "image/jpeg"
     elif update.message.document:
+        filename = update.message.document.file_name
         file_id = update.message.document.file_id
         mime_type = update.message.document.mime_type
         if mime_type and "image" in mime_type:
@@ -128,6 +132,7 @@ async def handle_incoming_message(update: Update, context: ContextTypes.DEFAULT_
     context.user_data['file_id'] = file_id
     context.user_data['is_image'] = is_image
     context.user_data['mime_type'] = mime_type
+    context.user_data['filename'] = filename
 
     keyboard = [
         [InlineKeyboardButton(f"📂 {p.name}", callback_data=f"proj_{p.id}")] for p in projects
@@ -158,12 +163,29 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 file_id = context.user_data.get('file_id')
                 mime_type = context.user_data.get('mime_type')
-                
+                filename = context.user_data.get('filename')
+
                 new_file = await context.bot.get_file(file_id)
-                file_byte_array = await new_file.download_as_bytearray()
+                file_byte_array = await new_file.download_as_bytearray()                
                 
-                # Здесь мы предполагаем, что если не текст, то фото (PDF пока пропускаем или обрабатываем как image если поддерживается)
-                json_data = process_content_with_ai(image_data=bytes(file_byte_array), media_type=mime_type or "image/jpeg")
+                # 1. Если это Картинка или PDF -> Отправляем байты в Claude/Vision
+                if context.user_data.get('is_image') or mime_type == 'application/pdf':
+                     json_data = process_content_with_ai(
+                         image_data=bytes(file_byte_array),
+                         media_type=mime_type or "image/jpeg",
+                         filename=filename
+                     )
+                
+                # 2. Если это Текстовый документ (.docx, .md, .txt) -> Извлекаем текст -> DeepSeek
+                else:
+                    extracted_text = extract_text_from_file(bytes(file_byte_array), mime_type)
+                    
+                    if extracted_text:
+                        logger.info(f"📄 Extracted {len(extracted_text)} chars from document. Sending to DeepSeek.")
+                        json_data = process_content_with_ai(text_content=extracted_text)
+                    else:
+                        await context.bot.send_message(chat_id=update.effective_chat.id, text="❌ Формат файла не поддерживается (пока).")
+                        return
 
             if not json_data:
                 await context.bot.send_message(chat_id=update.effective_chat.id, text="❌ AI не смог найти товары в этом сообщении.")
