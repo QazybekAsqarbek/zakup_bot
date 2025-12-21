@@ -27,38 +27,61 @@ SYSTEM_PROMPT = """
 [
   {
     "name": "Название Поставщика 1",
+    "delivery_date": "срок поставки (если указан)",
+    "vat_included": true/false (если указан НДС),
+    "warranty": "гарантия (если указана)",
     "items": [
       {
         "name": "Название товара",
         "quantity": 10.0,
         "unit": "м2/шт",
         "price_per_unit": 100.50,
+        "total_price": 1005.0,
         "currency": "RUB",
         "specs": {
            "color": "red",
            "size": "60x60",
            "brand": "Kerama",
-           "article": "A-100"
+           "article": "A-100",
+           "material": "керамика",
+           "manufacturer": "Kerama Marazzi"
         }
       }
     ]
   }
 ]
 
-1. Поле "specs" используй для любых характеристик (размер, артикул, материал, вес), которых нет в стандартных полях.
-2. Если поставщик не указан, назови его "Unknown Supplier".
-3. Верни список поставщиков, даже если он один.
+ВАЖНЫЕ ИНСТРУКЦИИ:
+1. Поле "specs" используй для любых характеристик (размер, артикул, материал, вес, бренд, производитель, модель), которых нет в стандартных полях.
+2. ОБЯЗАТЕЛЬНО извлекай характеристики товаров в "specs" - это критично для сравнения!
+3. Если указана общая сумма, но не цена за единицу, посчитай: price_per_unit = total_price / quantity
+4. Если указана цена за единицу, посчитай: total_price = price_per_unit * quantity
+5. Извлекай информацию о сроках поставки, НДС, гарантии на уровне поставщика
+6. Если поставщик не указан, назови его "Unknown Supplier".
+7. Верни список поставщиков, даже если он один.
+8. Будь максимально внимателен к деталям и характеристикам товаров!
 """
 
 def extract_json_from_text(text):
     """Надежный экстрактор JSON."""
     try:
-        match = re.search(r'\{.*\}', text, re.DOTALL)
-        if match:
-            return json.loads(match.group(0))
+        # Remove markdown code blocks
         text = text.replace("```json", "").replace("```", "").strip()
+        
+        # Try to find JSON array first (for list of suppliers)
+        array_match = re.search(r'\[.*\]', text, re.DOTALL)
+        if array_match:
+            return json.loads(array_match.group(0))
+        
+        # Then try to find JSON object
+        obj_match = re.search(r'\{.*\}', text, re.DOTALL)
+        if obj_match:
+            return json.loads(obj_match.group(0))
+        
+        # Try to parse the whole text as JSON
         return json.loads(text)
-    except Exception:
+    except Exception as e:
+        logger.error(f"JSON extraction failed: {e}, text preview: {text[:200]}")
         return None
 
 def process_content_with_ai(text_content=None, image_data=None, filename=None, media_type=None):
@@ -123,8 +146,9 @@ def process_content_with_ai(text_content=None, image_data=None, filename=None, m
 
     # --- ВЕТКА 3: DEEPSEEK (Только текст) ---
     if final_text_input.strip():
-        logger.info(f"📝 Text content ready. Routing to DEEPSEEK.")
+        logger.info(f"📝 Text content ready ({len(final_text_input)} chars). Routing to DEEPSEEK.")
         try:
+            logger.info("🤖 Calling DeepSeek API...")
             response = deepseek_client.chat.completions.create(
                 model=DEEPSEEK_MODEL,
                 messages=[
@@ -133,11 +157,21 @@ def process_content_with_ai(text_content=None, image_data=None, filename=None, m
                 ],
                 max_tokens=4000,
                 temperature=0.0,
-                stream=False
+                stream=False,
+                timeout=60.0  # 60 second timeout
             )
-            return extract_json_from_text(response.choices[0].message.content)
+            logger.info("✅ DeepSeek response received")
+            
+            result = extract_json_from_text(response.choices[0].message.content)
+            if result:
+                logger.info(f"✅ JSON extracted successfully")
+                return result
+            else:
+                logger.error(f"❌ Failed to extract JSON from response: {response.choices[0].message.content[:200]}")
+                return None
+                
         except Exception as e:
-            logger.error(f"❌ DeepSeek Error: {e}")
+            logger.error(f"❌ DeepSeek Error: {e}", exc_info=True)
             return None
 
     logger.warning("⚠️ No processable content found.")
