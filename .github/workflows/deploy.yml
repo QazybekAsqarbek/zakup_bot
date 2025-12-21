@@ -84,7 +84,7 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           source: "deploy/docker-compose.prod.yml"
           target: "~/zakup-bot/"
-          strip_components: 0
+          strip_components: 1
           debug: true
           timeout: 60s
 
@@ -216,9 +216,20 @@ jobs:
                 echo "MONGO_URL=$MONGO_URL"
               } > "$DEPLOY_DIR/.env"
               
+              # Проверяем наличие docker-compose.prod.yml
+              COMPOSE_FILE="$DEPLOY_DIR/docker-compose.prod.yml"
+              if [ ! -f "$COMPOSE_FILE" ]; then
+                echo "❌ Ошибка: Файл $COMPOSE_FILE не найден!"
+                echo "📁 Содержимое директории $DEPLOY_DIR:"
+                ls -la "$DEPLOY_DIR" || true
+                exit 1
+              fi
+              
               # Запускаем через docker-compose
               cd "$DEPLOY_DIR"
-              sudo docker-compose -f docker-compose.prod.yml up -d
+              echo "📂 Текущая директория: $(pwd)"
+              echo "📄 Используем файл: $COMPOSE_FILE"
+              sudo docker-compose -f "$COMPOSE_FILE" up -d
             }
 
             # Запускаем новый контейнер
