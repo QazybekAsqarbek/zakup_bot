@@ -4,9 +4,9 @@ services:
     container_name: smart_procure_bot
     restart: unless-stopped
     env_file:
-      - .env
+      - ../.env
     volumes:
-      - ./data:/app/data
+      - ../data:/app/data
     environment:
       - PYTHONUNBUFFERED=1
       - MONGO_URL=mongodb://mongo:27017
