@@ -1,11 +1,10 @@
-import anthropic
 import base64
 import json
 import re
 import logging
 from openai import OpenAI
 from src.config import (
-    ANTHROPIC_API_KEY, ANTHROPIC_MODEL,
+    OPEN_ROUTER_TOKEN, OPEN_ROUTER_BASE_URL, OPEN_ROUTER_MODEL,
     DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL
 )
 # Импортируем наш новый конвертер
@@ -13,7 +12,10 @@ from src.file_converter import convert_file_to_text
 
 logger = logging.getLogger(__name__)
 
-anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+openrouter_client = OpenAI(
+    api_key=OPEN_ROUTER_TOKEN,
+    base_url=OPEN_ROUTER_BASE_URL
+)
 deepseek_client = OpenAI(
     api_key=DEEPSEEK_API_KEY,
     base_url=DEEPSEEK_BASE_URL
@@ -87,50 +89,56 @@ def extract_json_from_text(text):
 def process_content_with_ai(text_content=None, image_data=None, filename=None, media_type=None):
     """
     Главный роутер:
-    1. Если PDF/Картинка -> Claude Vision.
+    1. Если PDF/Картинка -> Gemini Vision (через OpenRouter).
     2. Если DOCX/XLSX/TXT -> Конвертация в текст -> DeepSeek.
     3. Если просто текст -> DeepSeek.
     """
     
-    # --- ВЕТКА 1: CLAUDE VISION (PDF и Картинки) ---
-    # Claude нативно поддерживает PDF и основные картинки
-    is_claude_native = False
+    # --- ВЕТКА 1: GEMINI VISION (PDF и Картинки) ---
+    # Gemini через OpenRouter поддерживает PDF и основные картинки
+    is_vision_native = False
     if media_type == 'application/pdf':
-        is_claude_native = True
+        is_vision_native = True
     elif media_type and media_type.startswith('image/'):
-        is_claude_native = True
+        is_vision_native = True
 
-    if image_data and is_claude_native:
-        logger.info(f"🖼️ Native media detected ({media_type}). Routing to CLAUDE.")
+    if image_data and is_vision_native:
+        logger.info(f"🖼️ Native media detected ({media_type}). Routing to GEMINI.")
         
         b64_data = base64.b64encode(image_data).decode('utf-8')
-        content_block = []
         
-        content_block.append({
-            "type": "document" if media_type == 'application/pdf' else "image",
-            "source": {
-                "type": "base64",
-                "media_type": media_type,
-                "data": b64_data
+        # Формат для OpenAI-совместимого API (OpenRouter)
+        image_url = f"data:{media_type};base64,{b64_data}"
+        
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": image_url}
+                    },
+                    {"type": "text", "text": "Extract data to JSON."}
+                ]
             }
-        })
-        content_block.append({"type": "text", "text": "Extract data to JSON."})
+        ]
 
         try:
-            response = anthropic_client.messages.create(
-                model=ANTHROPIC_MODEL,
+            response = openrouter_client.chat.completions.create(
+                model=OPEN_ROUTER_MODEL,
+                messages=messages,
                 max_tokens=4000,
-                system=SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": content_block}]
+                temperature=0.0
             )
-            return extract_json_from_text(response.content[0].text)
+            return extract_json_from_text(response.choices[0].message.content)
         except Exception as e:
-            logger.error(f"❌ Claude Error: {e}")
+            logger.error(f"❌ Gemini Error: {e}")
             return None
 
     # --- ВЕТКА 2: КОНВЕРТАЦИЯ ФАЙЛОВ (Word, Excel, MD...) ---
     converted_text = None
-    if image_data and not is_claude_native and filename:
+    if image_data and not is_vision_native and filename:
         # Пытаемся превратить файл в текст
         converted_text = convert_file_to_text(image_data, filename)
         if converted_text:

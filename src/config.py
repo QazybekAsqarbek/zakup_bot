@@ -6,8 +6,9 @@ load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
 # AI settings
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-ANTHROPIC_MODEL = "claude-sonnet-4-5-20250929"
+OPEN_ROUTER_TOKEN = os.getenv("OPEN_ROUTER_TOKEN")
+OPEN_ROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+OPEN_ROUTER_MODEL = "google/gemini-2.0-flash-001"
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"

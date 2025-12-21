@@ -92,7 +92,7 @@ jobs:
         uses: appleboy/ssh-action@master
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPEN_ROUTER_TOKEN: ${{ secrets.OPEN_ROUTER_TOKEN }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           MONGO_URL: ${{ secrets.MONGO_URL || 'mongodb://mongo:27017' }}
           YC_REGISTRY_ID: ${{ secrets.YC_REGISTRY_ID }}
@@ -102,7 +102,7 @@ jobs:
           host: ${{ secrets.YC_INSTANCE_IP }}
           username: ${{ secrets.YC_INSTANCE_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: TELEGRAM_TOKEN,ANTHROPIC_API_KEY,DEEPSEEK_API_KEY,MONGO_URL,YC_REGISTRY_ID,NEW_IMAGE,BACKUP_IMAGE
+          envs: TELEGRAM_TOKEN,OPEN_ROUTER_TOKEN,DEEPSEEK_API_KEY,MONGO_URL,YC_REGISTRY_ID,NEW_IMAGE,BACKUP_IMAGE
           script: |
             set -e  # Остановка при ошибке
 
@@ -211,7 +211,7 @@ jobs:
               echo "📝 Создаем .env файл..."
               {
                 echo "TELEGRAM_TOKEN=$TELEGRAM_TOKEN"
-                echo "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"
+                echo "OPEN_ROUTER_TOKEN=$OPEN_ROUTER_TOKEN"
                 echo "DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY"
                 echo "MONGO_URL=$MONGO_URL"
               } > "$DEPLOY_DIR/.env"
