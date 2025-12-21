@@ -1,0 +1,31 @@
+services:
+  bot:
+    image: ${NEW_IMAGE:-cr.yandex/${YC_REGISTRY_ID}/zakup-bot:latest}
+    container_name: smart_procure_bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+      - MONGO_URL=mongodb://mongo:27017
+    depends_on:
+      - mongo
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+        window: 120s
+
+  mongo:
+    image: mongo:6.0
+    container_name: smart_procure_mongo
+    restart: always
+    volumes:
+      - mongo_data:/data/db
+
+volumes:
+  mongo_data:
+
