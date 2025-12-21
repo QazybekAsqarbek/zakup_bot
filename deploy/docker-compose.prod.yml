@@ -1,6 +1,6 @@
 services:
   bot:
-    image: ${NEW_IMAGE:-cr.yandex/${YC_REGISTRY_ID}/zakup-bot:latest}
+    image: ${NEW_IMAGE}
     container_name: smart_procure_bot
     restart: unless-stopped
     env_file:
@@ -15,9 +15,7 @@ services:
     deploy:
       restart_policy:
         condition: on-failure
-        delay: 10s
         max_attempts: 3
-        window: 120s
 
   mongo:
     image: mongo:6.0
