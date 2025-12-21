@@ -1,12 +1,14 @@
 services:
   bot:
-    image: ${NEW_IMAGE:-cr.yandex/${YC_REGISTRY_ID}/zakup-bot:latest}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
     container_name: smart_procure_bot
     restart: unless-stopped
     env_file:
-      - .env
+      - ../.env
     volumes:
-      - ./data:/app/data
+      - ../data:/app/data  # Чтобы база данных сохранялась при перезапуске
     environment:
       - PYTHONUNBUFFERED=1
       - MONGO_URL=mongodb://mongo:27017
@@ -28,4 +30,3 @@ services:
 
 volumes:
   mongo_data:
-

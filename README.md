@@ -31,7 +31,7 @@
 
 ```
 zakup_bot/
-├── src/
+├── src/                           # Исходный код бота
 │   ├── main.py                    # Telegram bot handlers
 │   ├── ai_engine.py               # AI parsing engine (Claude + DeepSeek)
 │   ├── category_intelligence.py   # Category detection & validation
@@ -42,9 +42,18 @@ zakup_bot/
 │   ├── file_converter.py          # File format conversions
 │   ├── file_reader.py             # File reading utilities
 │   └── config.py                  # Configuration
+├── deploy/                        # Файлы для деплоя
+│   ├── Dockerfile
+│   ├── docker-compose.yaml        # Для локальной разработки
+│   ├── docker-compose.prod.yml    # Для продакшн
+│   └── README.md                  # Инструкции по деплою
+├── docs/                          # Документация
+├── scripts/                       # Вспомогательные скрипты
+│   ├── verify_setup.py            # Проверка окружения
+│   ├── test_deepseek.py           # Тест DeepSeek API
+│   └── README.md
 ├── requirements.txt
-├── docker-compose.yaml
-├── Dockerfile
+├── .env.example                   # Пример конфигурации
 └── README.md
 ```
 
@@ -74,17 +83,37 @@ DEEPSEEK_API_KEY=your_deepseek_api_key
 MONGO_URL=mongodb://localhost:27017
 ```
 
-### Шаг 3: Запуск MongoDB
+### Шаг 3: Запуск с Docker (рекомендуется)
+
+```bash
+# Запуск MongoDB и бота через Docker Compose
+docker-compose -f deploy/docker-compose.yaml up -d
+
+# Просмотр логов
+docker-compose -f deploy/docker-compose.yaml logs -f bot
+```
+
+📖 **Подробные инструкции по запуску:** см. [deploy/README.md](deploy/README.md)
+
+### Шаг 4: Запуск без Docker
+
+#### 3.1. Запуск MongoDB
 
 ```bash
 # С помощью Docker
-docker-compose up -d
+docker-compose -f deploy/docker-compose.yaml up -d mongo
 
 # Или локально
 mongod
 ```
 
-### Шаг 4: Запуск бота
+#### 3.2. Проверка окружения (опционально)
+
+```bash
+python scripts/verify_setup.py
+```
+
+#### 3.3. Запуск бота
 
 ```bash
 python src/main.py
