@@ -12,7 +12,7 @@ The bot is running the OLD version without the new commands. You need to **resta
 ### Step 1: Verify Setup (Optional but Recommended)
 
 ```bash
-python verify_setup.py
+python scripts/verify_setup.py
 ```
 
 This will check:

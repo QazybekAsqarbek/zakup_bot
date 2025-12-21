@@ -60,8 +60,8 @@ jobs:
         run: |
           IMAGE_TAG="${{ env.REGISTRY }}/${{ secrets.YC_REGISTRY_ID }}/${{ env.IMAGE_NAME }}"
 
-          # Собираем образ
-          docker build -t ${IMAGE_TAG}:latest -t ${IMAGE_TAG}:${{ github.sha }} .
+          # Собираем образ (Dockerfile находится в deploy/)
+          docker build -f deploy/Dockerfile -t ${IMAGE_TAG}:latest -t ${IMAGE_TAG}:${{ github.sha }} .
 
           # Пушим оба тега
           docker push ${IMAGE_TAG}:latest
@@ -80,7 +80,7 @@ jobs:
           host: ${{ secrets.YC_INSTANCE_IP }}
           username: ${{ secrets.YC_INSTANCE_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "docker-compose.prod.yml"
+          source: "deploy/docker-compose.prod.yml"
           target: "~/zakup-bot/"
 
       - name: Deploy to server via SSH
