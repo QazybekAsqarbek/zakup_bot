@@ -65,17 +65,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
+      - name: Test SSH connection
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.YC_INSTANCE_IP }}
+          username: ${{ secrets.YC_INSTANCE_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            echo "✅ SSH connection successful"
+            whoami
+            pwd
+      
       - name: Copy docker-compose.prod.yml to server
-        uses: appleboy/scp-action@v0.1.7
+        uses: appleboy/scp-action@master
         with:
           host: ${{ secrets.YC_INSTANCE_IP }}
           username: ${{ secrets.YC_INSTANCE_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           source: "deploy/docker-compose.prod.yml"
           target: "~/zakup-bot/"
+          strip_components: 0
+          debug: true
+          timeout: 60s
 
       - name: Deploy to server via SSH
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@master
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -313,7 +327,7 @@ jobs:
 
       - name: Final verification
         if: always()
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.YC_INSTANCE_IP }}
           username: ${{ secrets.YC_INSTANCE_USER }}
