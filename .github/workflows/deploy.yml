@@ -43,18 +43,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Login to Yandex Container Registry
-        run: |
-          # Сохраняем JSON ключ во временный файл
-          echo '${{ secrets.YC_SA_JSON_CREDENTIALS }}' > /tmp/key.json
-
-          # Логинимся используя docker и yc CLI
-          cat /tmp/key.json | docker login \
-            --username json_key \
-            --password-stdin \
-            cr.yandex/${{ secrets.YC_REGISTRY_ID }}
-
-          # Удаляем временный файл
-          rm /tmp/key.json
+        uses: yc-actions/yc-cr-login@v3
+        with:
+          yc-sa-json-credentials: ${{ secrets.YC_SA_JSON_CREDENTIALS }}
 
       - name: Build and push Docker image
         run: |
