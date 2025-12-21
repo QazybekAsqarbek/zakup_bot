@@ -1,6 +1,7 @@
 import io
 import logging
 import pandas as pd
+import httpx
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from src.config import TELEGRAM_TOKEN
@@ -120,7 +121,9 @@ async def handle_incoming_message(update: Update, context: ContextTypes.DEFAULT_
         [InlineKeyboardButton(f"📂 {p['name']}", callback_data=f"proj_{str(p['_id'])}")] for p in projects
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(f"Куда сохранить **{filename}**?", reply_markup=reply_markup, parse_mode="Markdown")
+    # Escape markdown special characters in filename
+    safe_filename = filename.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
+    await update.message.reply_text(f"Куда сохранить **{safe_filename}**?", reply_markup=reply_markup, parse_mode="Markdown")
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -402,13 +405,13 @@ async def compare_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_message(
                     chat_id=update.effective_chat.id,
                     text=chunk,
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
         else:
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text=summary,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
         
     except Exception as e:
@@ -544,7 +547,7 @@ async def analysis_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text=summary[:4000],  # Truncate if too long
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
         
         # Then check for missing data
@@ -577,7 +580,50 @@ async def analysis_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text="❌ Ошибка при анализе"
         )
 
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle errors in the telegram bot."""
+    logger.error("Exception while handling an update:", exc_info=context.error)
+    
+    # Handle specific error types
+    error_message = str(context.error)
+    if "Conflict" in error_message or "terminated by other getUpdates" in error_message:
+        logger.error("🔴 Conflict error detected - another bot instance may be running")
+        # Don't crash, just log and continue
+        return
+    
+    # For other errors, try to notify the user if possible
+    try:
+        if update and hasattr(update, 'effective_message'):
+            await update.effective_message.reply_text(
+                "Произошла ошибка. Попробуйте ещё раз."
+            )
+    except Exception as e:
+        logger.error(f"Could not send error message to user: {e}")
+
 if __name__ == '__main__':
+    import sys
+    import time
+    from telegram.error import Conflict, NetworkError
+    
+    # Clear any webhook before starting
+    logger.info("🔄 Clearing webhook and pending updates...")
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            response = client.post(
+                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/deleteWebhook",
+                json={"drop_pending_updates": True}
+            )
+            if response.status_code == 200:
+                logger.info("✅ Webhook cleared")
+            else:
+                logger.warning(f"⚠️ Could not clear webhook: {response.status_code}")
+    except Exception as e:
+        logger.warning(f"⚠️ Could not clear webhook: {e}")
+    
+    # Wait a bit to ensure previous instances have released the lock
+    logger.info("⏳ Waiting 5 seconds before starting polling...")
+    time.sleep(5)
+    
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
 
     app.add_handler(CommandHandler("start", start))
@@ -594,6 +640,32 @@ if __name__ == '__main__':
     ))
     
     app.add_handler(CallbackQueryHandler(button_callback))
+    
+    # Add error handler
+    app.add_error_handler(error_handler)
 
-    print("Bot is running...")
-    app.run_polling()
+    logger.info("🚀 Starting bot with polling...")
+    
+    # Run with retry logic for conflict errors
+    max_retries = 3
+    retry_delay = 30
+    
+    for attempt in range(max_retries):
+        try:
+            app.run_polling(
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=True
+            )
+            break  # If successful, exit the loop
+        except Conflict as e:
+            logger.error(f"🔴 Conflict error (attempt {attempt + 1}/{max_retries}): {e}")
+            if attempt < max_retries - 1:
+                logger.info(f"⏳ Waiting {retry_delay} seconds before retry...")
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
+            else:
+                logger.error("❌ Maximum retry attempts reached. Another instance may be running elsewhere.")
+                sys.exit(1)
+        except Exception as e:
+            logger.error(f"❌ Unexpected error: {e}", exc_info=True)
+            sys.exit(1)

@@ -1,9 +1,10 @@
 import logging
 import json
 import re
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from collections import defaultdict
 from openai import OpenAI
+from rapidfuzz import fuzz, process
 from src.config import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL
 
 logger = logging.getLogger(__name__)
@@ -27,15 +28,66 @@ class QuoteComparator:
             return ""
         return re.sub(r'\s+', ' ', name.lower().strip())
     
-    def _group_similar_items(self, quotes: List[Dict]) -> Dict[str, List[Dict]]:
+    def _find_similar_group(self, item_name: str, existing_groups: Dict[str, List], 
+                           similarity_threshold: float = 50.0) -> Optional[str]:
+        """
+        Find an existing group that matches the item name with fuzzy matching.
+        Uses token_sort_ratio which ignores word order.
+        
+        Args:
+            item_name: Normalized item name to match
+            existing_groups: Current groups dictionary
+            similarity_threshold: Minimum similarity score (0-100)
+            
+        Returns:
+            Key of matching group, or None if no match found
+        """
+        if not existing_groups:
+            return None
+        
+        # Use token_sort_ratio - ignores word order, better for product names
+        result = process.extractOne(
+            item_name, 
+            existing_groups.keys(),
+            scorer=fuzz.token_sort_ratio,
+            score_cutoff=similarity_threshold
+        )
+        
+        if result:
+            matched_name, score, _ = result
+            logger.debug(f"🔗 Fuzzy match: '{item_name}' → '{matched_name}' (score: {score:.1f})")
+            return matched_name
+        else:
+            # Log best match even if below threshold for debugging
+            if existing_groups:
+                best_match = process.extractOne(
+                    item_name, 
+                    existing_groups.keys(),
+                    scorer=fuzz.token_sort_ratio
+                )
+                if best_match:
+                    matched_name, score, _ = best_match
+                    logger.debug(f"❌ No match: '{item_name}' closest to '{matched_name}' (score: {score:.1f}, threshold: {similarity_threshold})")
+        
+        return None
+    
+    def _group_similar_items(self, quotes: List[Dict], use_fuzzy: bool = True, 
+                             fuzzy_threshold: float = 50.0) -> Dict[str, List[Dict]]:
         """
         Group items by similar names across all suppliers.
-        Uses simple name matching (can be enhanced with fuzzy matching).
+        Uses fuzzy matching to find similar items even with different naming.
+        
+        Args:
+            quotes: List of quote documents
+            use_fuzzy: Enable fuzzy matching (default True)
+            fuzzy_threshold: Similarity threshold for fuzzy matching (0-100)
         
         Returns:
             Dictionary mapping normalized_name to list of items from different suppliers
         """
         grouped = defaultdict(list)
+        all_items_log = []
+        fuzzy_matches = []
         
         for quote in quotes:
             source_file = quote.get("source_file", "")
@@ -44,20 +96,73 @@ class QuoteComparator:
                 supplier_name = supplier.get("name", "Unknown")
                 
                 for item in supplier.get("items", []):
-                    normalized_name = self._normalize_item_name(item.get("name", ""))
+                    original_name = item.get("name", "")
+                    normalized_name = self._normalize_item_name(original_name)
                     
-                    if normalized_name:
-                        item_with_context = item.copy()
-                        item_with_context["_supplier"] = supplier_name
-                        item_with_context["_source"] = source_file
-                        
-                        grouped[normalized_name].append(item_with_context)
+                    if not normalized_name:
+                        continue
+                    
+                    item_with_context = item.copy()
+                    item_with_context["_supplier"] = supplier_name
+                    item_with_context["_source"] = source_file
+                    item_with_context["_original_name"] = original_name
+                    
+                    # Try fuzzy matching with existing groups
+                    target_group = normalized_name
+                    
+                    if use_fuzzy and grouped:
+                        similar_group = self._find_similar_group(
+                            normalized_name, 
+                            grouped, 
+                            fuzzy_threshold
+                        )
+                        if similar_group:
+                            target_group = similar_group
+                            fuzzy_matches.append(
+                                f"  🔗 '{normalized_name}' → '{target_group}'"
+                            )
+                    
+                    grouped[target_group].append(item_with_context)
+                    all_items_log.append(f"  [{supplier_name}] {original_name}")
         
-        # Filter out items that appear only once (nothing to compare)
+        # Log all found items
+        logger.info(f"📦 Найдено товаров всего: {len(all_items_log)}")
+        for log_entry in all_items_log[:15]:  # Show first 15
+            logger.info(log_entry)
+        if len(all_items_log) > 15:
+            logger.info(f"  ... и еще {len(all_items_log) - 15} товаров")
+        
+        # Log fuzzy matches
+        if fuzzy_matches:
+            logger.info(f"🔗 Fuzzy matching нашел {len(fuzzy_matches)} совпадений:")
+            for match in fuzzy_matches[:10]:
+                logger.info(match)
+            if len(fuzzy_matches) > 10:
+                logger.info(f"  ... и еще {len(fuzzy_matches) - 10}")
+        
+        # Log grouping results
+        logger.info(f"📊 Уникальных групп товаров: {len(grouped)}")
+        for name, items in list(grouped.items())[:10]:
+            suppliers = [i['_supplier'] for i in items]
+            unique_suppliers = set(suppliers)
+            supplier_list = ", ".join(list(unique_suppliers)[:3])
+            if len(unique_suppliers) > 3:
+                supplier_list += f"... +{len(unique_suppliers) - 3}"
+            logger.info(f"  '{name}' → {len(items)} вхождений от {len(unique_suppliers)} поставщиков ({supplier_list})")
+        
+        # Return all groups with 2+ items (including from same supplier)
+        # User wants to see all products in project, not just cross-supplier comparisons
         comparable_groups = {
             name: items for name, items in grouped.items() 
             if len(items) > 1
         }
+        
+        # Count how many groups have multiple suppliers vs single supplier
+        multi_supplier = sum(1 for items in comparable_groups.values() 
+                           if len(set(i['_supplier'] for i in items)) > 1)
+        single_supplier = len(comparable_groups) - multi_supplier
+        
+        logger.info(f"✅ Групп для анализа: {len(comparable_groups)} (от разных поставщиков: {multi_supplier}, варианты одного поставщика: {single_supplier})")
         
         return comparable_groups
     
@@ -179,7 +284,7 @@ class QuoteComparator:
     
     async def compare_project_quotes(self, quotes: List[Dict]) -> Dict:
         """
-        Main method to compare all quotes in a project.
+        Main method to compare all quotes in a project with intelligent grouping.
         
         Args:
             quotes: List of quote documents from database
@@ -194,13 +299,13 @@ class QuoteComparator:
                 "item_comparisons": []
             }
         
-        # Group similar items
-        grouped_items = self._group_similar_items(quotes)
+        # Group similar items using fuzzy matching (threshold 40% for better matching)
+        grouped_items = self._group_similar_items(quotes, fuzzy_threshold=40.0)
         
         if not grouped_items:
             return {
                 "status": "no_matches",
-                "message": "Нет совпадающих товаров у разных поставщиков",
+                "message": "Нет товаров для анализа (все товары уникальны)",
                 "total_unique_items": sum(
                     len(supplier.get("items", [])) 
                     for quote in quotes 
@@ -208,6 +313,71 @@ class QuoteComparator:
                 ),
                 "item_comparisons": []
             }
+        
+        # Compare each group with LLM analysis
+        comparisons = []
+        total_savings = 0
+        
+        for item_name, item_group in grouped_items.items():
+            unique_suppliers = len(set(item['_supplier'] for item in item_group))
+            logger.info(f"🔍 Анализирую '{item_name}' ({len(item_group)} позиций от {unique_suppliers} поставщиков)")
+            
+            # Try LLM comparison first
+            llm_result = await self._compare_item_group_with_llm(item_group, item_name)
+            
+            if llm_result:
+                recommendation = llm_result
+            else:
+                # Fallback to simple comparison
+                recommendation = self._simple_price_comparison(item_group)
+            
+            # Mark if this is a multi-supplier comparison or single supplier variants
+            recommendation["is_multi_supplier"] = unique_suppliers > 1
+            recommendation["supplier_count"] = unique_suppliers
+            
+            # Calculate savings
+            prices = [item.get("normalized_price", 0) for item in item_group if item.get("normalized_price")]
+            if prices:
+                best_price = min(prices)
+                worst_price = max(prices)
+                savings_per_unit = worst_price - best_price
+                avg_quantity = sum(item.get("normalized_quantity", 0) for item in item_group) / len(item_group)
+                total_savings_estimate = savings_per_unit * avg_quantity if avg_quantity > 0 else 0
+            else:
+                savings_per_unit = 0
+                total_savings_estimate = 0
+            
+            comparisons.append({
+                "item_name": item_name,
+                "suppliers_count": len(item_group),
+                "recommendation": recommendation,
+                "savings_per_unit": savings_per_unit,
+                "total_savings_estimate": total_savings_estimate,
+                "all_options": [
+                    {
+                        "supplier": item.get("_supplier"),
+                        "price": item.get("normalized_price"),
+                        "unit": item.get("normalized_unit"),
+                        "quantity": item.get("normalized_quantity"),
+                        "completeness": item.get("completeness_score", 0)
+                    }
+                    for item in item_group
+                ]
+            })
+            
+            if recommendation.get("price_difference_percent", 0) > 0:
+                total_savings += recommendation.get("price_difference_percent", 0)
+        
+        avg_savings = total_savings / len(comparisons) if comparisons else 0
+        
+        return {
+            "status": "success",
+            "message": f"Найдено {len(comparisons)} товаров для сравнения",
+            "items_compared": len(comparisons),
+            "average_savings_percent": round(avg_savings, 1),
+            "item_comparisons": comparisons,
+            "generated_at": None
+        }
         
         # Compare each group
         comparisons = []
@@ -267,30 +437,67 @@ class QuoteComparator:
             comparison_result: Result from compare_project_quotes
             
         Returns:
-            Formatted text summary
+            Formatted text summary (HTML format)
         """
         if comparison_result.get("status") != "success":
             return comparison_result.get("message", "Нет данных для сравнения")
         
         comparisons = comparison_result.get("item_comparisons", [])
+        avg_savings = comparison_result.get("average_savings_percent", 0)
         
-        summary = f"""📊 **АНАЛИЗ КОММЕРЧЕСКИХ ПРЕДЛОЖЕНИЙ**
+        summary = f"""📊 <b>УМНОЕ СРАВНЕНИЕ ПРЕДЛОЖЕНИЙ</b>
 
-Сравнено товаров: {comparison_result.get('items_compared', 0)}
-Средняя экономия: {comparison_result.get('average_savings_percent', 0)}%
+Найдено товаров: {len(comparisons)}
+Средняя экономия: {avg_savings:.1f}%
 
 """
         
-        # Top recommendations
-        summary += "🏆 **РЕКОМЕНДАЦИИ:**\n\n"
+        # Show detailed analysis for each item group
+        summary += "🎯 <b>ДЕТАЛЬНЫЙ АНАЛИЗ:</b>\n\n"
         
         for i, comp in enumerate(comparisons[:10], 1):  # Top 10
             rec = comp["recommendation"]
-            summary += f"{i}. **{comp['item_name']}**\n"
-            summary += f"   Рекомендация: {rec.get('recommended_supplier')}\n"
-            summary += f"   Цена: {rec.get('recommended_price')} {rec.get('price_unit')}\n"
-            summary += f"   Экономия: {rec.get('price_difference_percent')}%\n"
-            summary += f"   Причина: {rec.get('reasoning')}\n\n"
+            item_name = comp["item_name"]
+            suppliers_count = comp["suppliers_count"]
+            savings_per_unit = comp.get("savings_per_unit", 0)
+            total_savings = comp.get("total_savings_estimate", 0)
+            is_multi = rec.get("is_multi_supplier", False)
+            
+            # Shorten item name if too long
+            if len(item_name) > 60:
+                item_name = item_name[:57] + "..."
+            
+            # Different icons for multi-supplier vs single supplier
+            icon = "🔄" if is_multi else "📦"
+            summary += f"<b>{i}. {icon} {item_name}</b>\n"
+            
+            if is_multi:
+                summary += f"📌 Сравнение: {suppliers_count} позиций от {rec.get('supplier_count', 1)} поставщиков\n"
+            else:
+                summary += f"📌 Варианты от одного поставщика: {suppliers_count} шт\n"
+                
+            summary += f"🥇 Лучший: {rec.get('recommended_supplier', 'N/A')}\n"
+            summary += f"💰 Цена: {rec.get('recommended_price', 0):.2f} {rec.get('price_unit', '')}\n"
+            
+            if rec.get('price_difference_percent', 0) > 0:
+                summary += f"💸 Экономия: {rec.get('price_difference_percent', 0):.1f}%"
+                if savings_per_unit > 0:
+                    summary += f" ({savings_per_unit:.2f} руб/ед)"
+                if total_savings > 100:
+                    summary += f"\n   На объем: ~{total_savings:,.0f} руб"
+                summary += "\n"
+            
+            summary += f"📝 {rec.get('reasoning', 'Нет данных')}\n"
+            
+            # Show all suppliers for this item
+            all_opts = comp.get("all_options", [])
+            if len(all_opts) > 1:
+                summary += "   Альтернативы:\n"
+                for opt in sorted(all_opts, key=lambda x: x.get('price', float('inf')))[:3]:
+                    if opt['supplier'] != rec.get('recommended_supplier'):
+                        summary += f"   • {opt['supplier']}: {opt.get('price', 0):.2f} {opt.get('unit', '')}\n"
+            
+            summary += "\n"
         
         if len(comparisons) > 10:
             summary += f"... и еще {len(comparisons) - 10} товаров\n"

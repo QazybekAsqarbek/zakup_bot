@@ -190,9 +190,9 @@ class UnitNormalizer:
         Returns:
             Item with added normalized_quantity, normalized_unit, normalized_price
         """
-        quantity = item.get("quantity", 0)
+        quantity = item.get("quantity", 0) or 0
         unit = item.get("unit", "")
-        price_per_unit = item.get("price_per_unit", 0)
+        price_per_unit = item.get("price_per_unit") or 0
         item_name = item.get("name", "")
         
         if not unit or not quantity:

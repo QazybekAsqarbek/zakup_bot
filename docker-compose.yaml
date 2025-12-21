@@ -2,7 +2,7 @@ services:
   bot:
     build: .
     container_name: smart_procure_bot
-    restart: always
+    restart: unless-stopped
     env_file:
       - .env
     volumes:
@@ -12,6 +12,12 @@ services:
       - MONGO_URL=mongodb://mongo:27017
     depends_on:
       - mongo
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+        window: 120s
 
   mongo:
     image: mongo:6.0
